@@ -23,6 +23,8 @@ jobs:
     name: Generate and Publish OpEx Post
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    permissions:
+      contents: write
 
     steps:
       # 1. Checkout repository
