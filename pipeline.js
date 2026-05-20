@@ -9,7 +9,7 @@ import { join, dirname } from "path";
 import { fileURLToPath } from "url";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const ROOT = join(__dirname, "..");
+const ROOT = __dirname; // script runs from repo root
 
 // ─── Config ──────────────────────────────────────────────────────────────────
 const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
@@ -22,7 +22,7 @@ if (!DRY_RUN && !LINKEDIN_ACCESS_TOKEN) throw new Error("LINKEDIN_ACCESS_TOKEN i
 // ─── Auto-discover LinkedIn Person URN ───────────────────────────────────────
 async function getPersonURN() {
   // Try cached URN first
-  const cacheFile = join(ROOT, "topics", "urn.cache");
+  const cacheFile = join(ROOT, "urn.cache");
   if (existsSync(cacheFile)) {
     const cached = readFileSync(cacheFile, "utf8").trim();
     if (cached.startsWith("urn:li:person:")) {
@@ -69,7 +69,7 @@ async function getPersonURN() {
 }
 
 // ─── Topics rotation ─────────────────────────────────────────────────────────
-const TOPICS_FILE = join(ROOT, "topics", "rotation.json");
+const TOPICS_FILE = join(ROOT, "rotation.json");
 
 const DEFAULT_TOPICS = [
   { topic: "Lean Manufacturing & Toyota Production System", tone: "thought_leader" },
