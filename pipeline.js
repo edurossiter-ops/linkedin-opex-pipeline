@@ -22,7 +22,7 @@ if (!DRY_RUN && !LINKEDIN_ACCESS_TOKEN) throw new Error("LINKEDIN_ACCESS_TOKEN i
 // ─── Auto-discover LinkedIn Person URN ───────────────────────────────────────
 async function getPersonURN() {
   // Try cached URN first
-  const cacheFile = join(ROOT, "urn.cache");
+  const cacheFile = join(ROOT, "topics", "urn.cache");
   if (existsSync(cacheFile)) {
     const cached = readFileSync(cacheFile, "utf8").trim();
     if (cached.startsWith("urn:li:person:")) {
@@ -69,7 +69,7 @@ async function getPersonURN() {
 }
 
 // ─── Topics rotation ─────────────────────────────────────────────────────────
-const TOPICS_FILE = join(ROOT, "rotation.json");
+const TOPICS_FILE = join(ROOT, "topics", "rotation.json");
 
 const DEFAULT_TOPICS = [
   { topic: "Lean Manufacturing & Toyota Production System", tone: "thought_leader" },
@@ -133,9 +133,47 @@ function extractText(data) {
     .trim();
 }
 
+// ─── Source & angle rotation ─────────────────────────────────────────────────
+const SOURCE_GROUPS = [
+  "Harvard Business Review and MIT Sloan Management Review",
+  "McKinsey Quarterly and BCG Henderson Institute",
+  "Journal of Operations Management and International Journal of Production Economics",
+  "ASQ Quality Progress and iSixSigma research",
+  "Deloitte Insights and Accenture research",
+  "peer-reviewed academic journals published in 2024-2025 (Scopus or Web of Science indexed)",
+  "Industry reports from Gartner, IDC, or Forrester on operations and manufacturing",
+  "World Economic Forum and OECD industrial competitiveness reports",
+];
+
+const SEARCH_ANGLES = [
+  "Focus on a surprising or counterintuitive finding that challenges mainstream thinking.",
+  "Focus on quantified ROI or financial impact data from real implementations.",
+  "Focus on a recent case study from a Fortune 500 or DAX-listed company.",
+  "Focus on an emerging trend or methodology that is gaining traction in 2025.",
+  "Focus on a failure or cautionary tale — what went wrong and why.",
+  "Focus on cross-industry application — lessons from healthcare, aerospace, or tech applied to manufacturing.",
+  "Focus on the human/culture side — leadership, change management, resistance.",
+  "Focus on technology integration — AI, IoT, digital twin, or automation angles.",
+];
+
+function pickRandom(arr, seed) {
+  // Deterministic pick based on date so each day gets different combo
+  const idx = Math.floor(seed % arr.length);
+  return arr[idx];
+}
+
 // ─── Step 1: Research ─────────────────────────────────────────────────────────
 async function researchTopic(topic) {
   console.log(`\n🔍 Researching: "${topic}"`);
+
+  // Use date + topic hash for deterministic but varied selection
+  const seed = Date.now() + topic.length * 137 + new Date().getDate() * 31;
+  const sourceGroup = pickRandom(SOURCE_GROUPS, seed);
+  const angle = pickRandom(SEARCH_ANGLES, seed + 7);
+  const year = new Date().getFullYear();
+
+  console.log(`   Source group: ${sourceGroup.slice(0, 50)}...`);
+  console.log(`   Angle: ${angle.slice(0, 60)}...`);
 
   const data = await callClaude({
     tools: [{ type: "web_search_20250305", name: "web_search" }],
@@ -143,9 +181,13 @@ async function researchTopic(topic) {
       role: "user",
       content: `You are an expert researcher in Operational Excellence (OpEx).
 
-Search for the MOST RECENT (2024-2025) articles and studies on: "${topic}"
+Search for the MOST RECENT (${year - 1}-${year}) articles and studies on: "${topic}"
 
-Focus exclusively on top-tier sources: Harvard Business Review, MIT Sloan Management Review, McKinsey Quarterly, Journal of Operations Management, ASQ Quality Progress, BCG Henderson Institute, Deloitte Insights, or peer-reviewed academic journals.
+SOURCE CONSTRAINT: Search specifically in ${sourceGroup}. Do NOT default to the same popular articles — actively seek out lesser-known but high-quality research.
+
+ANGLE: ${angle}
+
+IMPORTANT: Every run of this pipeline must surface DIFFERENT content. If you find a well-known article, skip it and dig deeper for something fresher or more niche.
 
 Return ONLY valid JSON (no markdown) with this structure:
 {
@@ -158,7 +200,7 @@ Return ONLY valid JSON (no markdown) with this structure:
   "deep_insight": "High-level insight in 2-3 sentences — what does this mean for operational leaders?",
   "source_title": "Title of the most relevant article or study found",
   "source_name": "Name of the publication or journal",
-  "year": "2024 or 2025",
+  "year": "${year - 1} or ${year}",
   "conventional_wisdom_challenged": "What common belief does this data or study challenge?"
 }`
     }],
