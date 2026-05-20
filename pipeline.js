@@ -1,0 +1,280 @@
+#!/usr/bin/env node
+/**
+ * OpEx LinkedIn Pipeline
+ * Researches recent articles → Generates high-level post → Publishes to LinkedIn
+ */
+
+import { readFileSync, writeFileSync, existsSync } from "fs";
+import { join, dirname } from "path";
+import { fileURLToPath } from "url";
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const ROOT = join(__dirname, "..");
+
+// ─── Config ──────────────────────────────────────────────────────────────────
+const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
+const LINKEDIN_ACCESS_TOKEN = process.env.LINKEDIN_ACCESS_TOKEN;
+const LINKEDIN_PERSON_URN = process.env.LINKEDIN_PERSON_URN; // urn:li:person:XXXXXX
+const DRY_RUN = process.env.DRY_RUN === "true"; // true = generate only, do not publish
+
+if (!ANTHROPIC_API_KEY) throw new Error("ANTHROPIC_API_KEY is not set");
+if (!DRY_RUN && !LINKEDIN_ACCESS_TOKEN) throw new Error("LINKEDIN_ACCESS_TOKEN is not set");
+if (!DRY_RUN && !LINKEDIN_PERSON_URN) throw new Error("LINKEDIN_PERSON_URN is not set");
+
+// ─── Topics rotation ─────────────────────────────────────────────────────────
+const TOPICS_FILE = join(ROOT, "topics", "rotation.json");
+
+const DEFAULT_TOPICS = [
+  { topic: "Lean Manufacturing & Toyota Production System", tone: "thought_leader" },
+  { topic: "Six Sigma & DMAIC — Advanced Applications", tone: "data_driven" },
+  { topic: "Theory of Constraints (TOC) in Industrial Operations", tone: "provocateur" },
+  { topic: "Digital Lean / Industry 4.0 Integration", tone: "thought_leader" },
+  { topic: "AI-Driven Process Optimization", tone: "data_driven" },
+  { topic: "Hoshin Kanri & Strategy Deployment", tone: "thought_leader" },
+  { topic: "Total Productive Maintenance (TPM)", tone: "practitioner" },
+  { topic: "Value Stream Mapping & Flow Efficiency", tone: "practitioner" },
+  { topic: "Operational Excellence in Healthcare", tone: "data_driven" },
+  { topic: "Kaizen & Continuous Improvement Culture", tone: "provocateur" },
+  { topic: "OpEx Metrics — OEE, TEEP and Beyond", tone: "data_driven" },
+  { topic: "Design for Six Sigma (DFSS)", tone: "thought_leader" },
+];
+
+function getNextTopic() {
+  let state = { index: 0 };
+  if (existsSync(TOPICS_FILE)) {
+    try { state = JSON.parse(readFileSync(TOPICS_FILE, "utf8")); } catch {}
+  }
+  const topic = DEFAULT_TOPICS[state.index % DEFAULT_TOPICS.length];
+  state.index = (state.index + 1) % DEFAULT_TOPICS.length;
+  writeFileSync(TOPICS_FILE, JSON.stringify(state, null, 2));
+  return topic;
+}
+
+// ─── Claude API call ──────────────────────────────────────────────────────────
+async function callClaude({ messages, tools, system, max_tokens = 1500 }) {
+  const body = {
+    model: "claude-sonnet-4-20250514",
+    max_tokens,
+    messages,
+    ...(system && { system }),
+    ...(tools && { tools }),
+  };
+
+  const res = await fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "x-api-key": ANTHROPIC_API_KEY,
+      "anthropic-version": "2023-06-01",
+      "anthropic-beta": "web-search-2025-03-05",
+    },
+    body: JSON.stringify(body),
+  });
+
+  if (!res.ok) {
+    const err = await res.text();
+    throw new Error(`Claude API error ${res.status}: ${err}`);
+  }
+  return res.json();
+}
+
+function extractText(data) {
+  return (data.content || [])
+    .filter(b => b.type === "text")
+    .map(b => b.text)
+    .join("\n")
+    .trim();
+}
+
+// ─── Step 1: Research ─────────────────────────────────────────────────────────
+async function researchTopic(topic) {
+  console.log(`\n🔍 Researching: "${topic}"`);
+
+  const data = await callClaude({
+    tools: [{ type: "web_search_20250305", name: "web_search" }],
+    messages: [{
+      role: "user",
+      content: `You are an expert researcher in Operational Excellence (OpEx).
+
+Search for the MOST RECENT (2024-2025) articles and studies on: "${topic}"
+
+Focus exclusively on top-tier sources: Harvard Business Review, MIT Sloan Management Review, McKinsey Quarterly, Journal of Operations Management, ASQ Quality Progress, BCG Henderson Institute, Deloitte Insights, or peer-reviewed academic journals.
+
+Return ONLY valid JSON (no markdown) with this structure:
+{
+  "headline_finding": "The most important or surprising finding in 1 sentence",
+  "key_stats": [
+    "Statistic 1 with source and year",
+    "Statistic 2 with source and year",
+    "Statistic 3 with source and year"
+  ],
+  "deep_insight": "High-level insight in 2-3 sentences — what does this mean for operational leaders?",
+  "source_title": "Title of the most relevant article or study found",
+  "source_name": "Name of the publication or journal",
+  "year": "2024 or 2025",
+  "conventional_wisdom_challenged": "What common belief does this data or study challenge?"
+}`
+    }],
+    max_tokens: 1200,
+  });
+
+  const text = extractText(data);
+  try {
+    const jsonMatch = text.match(/\{[\s\S]*\}/);
+    if (jsonMatch) return JSON.parse(jsonMatch[0]);
+  } catch {}
+
+  // Fallback: return raw text if JSON parsing fails
+  return { raw: text, headline_finding: topic };
+}
+
+// ─── Step 2: Generate Post ────────────────────────────────────────────────────
+async function generatePost(topic, tone, research) {
+  console.log(`\n✍️  Generating post (tone: ${tone})...`);
+
+  const toneInstructions = {
+    thought_leader: "Strategic forward-looking vision. Connect macro trends to real operational impact. Position the reader as someone who needs to act now.",
+    data_driven: "Precise data and scientific evidence at the center. Be rigorous, cite specific sources. Turn numbers into actionable insights.",
+    provocateur: "Openly challenge established beliefs. Use strong rhetoric. Push the reader to question what has 'always worked'.",
+    practitioner: "Direct, practical application. Use real shop-floor or operations examples. Concrete steps a manager can implement tomorrow.",
+  };
+
+  const researchContext = research.raw
+    ? research.raw.slice(0, 600)
+    : JSON.stringify(research, null, 2);
+
+  const data = await callClaude({
+    messages: [{
+      role: "user",
+      content: `You are a world-class Operational Excellence expert and premium LinkedIn content creator with 200k+ followers.
+
+RESEARCH CONTEXT:
+${researchContext}
+
+TOPIC: ${topic}
+TONE: ${toneInstructions[tone] || toneInstructions.thought_leader}
+
+Write an EXCEPTIONAL LinkedIn post following these rules:
+
+MANDATORY STRUCTURE:
+1. First line: irresistible scroll-stopping hook (max 12 words, no period, can be a question or bold statement)
+2. [blank line]
+3. Development in short blocks (2-3 lines per block, separated by blank lines)
+4. Specific data with real sources — NEVER vague claims
+5. Counterintuitive insight or provocation in the middle
+6. Closing that positions the reader to take action
+7. [blank line]
+8. Engagement question for the comments
+9. [blank line]
+10. 4-5 strategic OpEx hashtags
+
+QUALITY RULES:
+- English with precise technical terminology
+- Between 1,300 and 1,800 characters total
+- Maximum 3 emojis, only where they add real value
+- NEVER generic phrases like "in today's world" or "it is essential"
+- NEVER bullet points with hyphens or asterisks — use paragraphs
+- Tone of someone who knows more than anyone in the room but genuinely wants to share
+
+Return ONLY the post text, ready to publish. No additional commentary.`
+    }],
+    max_tokens: 1000,
+  });
+
+  return extractText(data);
+}
+
+// ─── Step 3: Publish to LinkedIn ──────────────────────────────────────────────
+async function publishToLinkedIn(postText) {
+  if (DRY_RUN) {
+    console.log("\n[DRY RUN] Post that would be published:\n");
+    console.log("─".repeat(60));
+    console.log(postText);
+    console.log("─".repeat(60));
+    return { id: "dry-run-" + Date.now() };
+  }
+
+  console.log("\n📤 Publishing to LinkedIn...");
+
+  const res = await fetch("https://api.linkedin.com/v2/ugcPosts", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "Authorization": `Bearer ${LINKEDIN_ACCESS_TOKEN}`,
+      "X-Restli-Protocol-Version": "2.0.0",
+    },
+    body: JSON.stringify({
+      author: LINKEDIN_PERSON_URN,
+      lifecycleState: "PUBLISHED",
+      specificContent: {
+        "com.linkedin.ugc.ShareContent": {
+          shareCommentary: { text: postText },
+          shareMediaCategory: "NONE",
+        },
+      },
+      visibility: {
+        "com.linkedin.ugc.MemberNetworkVisibility": "PUBLIC",
+      },
+    }),
+  });
+
+  if (!res.ok) {
+    const err = await res.text();
+    throw new Error(`LinkedIn API error ${res.status}: ${err}`);
+  }
+
+  const data = await res.json();
+  return data;
+}
+
+// ─── Step 4: Save log ─────────────────────────────────────────────────────────
+function saveLog(entry) {
+  const logFile = join(ROOT, "logs", "posts.jsonl");
+  const dir = join(ROOT, "logs");
+  if (!existsSync(dir)) {
+    import("fs").then(fs => fs.mkdirSync(dir, { recursive: true }));
+  }
+  try {
+    writeFileSync(logFile, JSON.stringify(entry) + "\n", { flag: "a" });
+  } catch {}
+}
+
+// ─── Main ─────────────────────────────────────────────────────────────────────
+async function main() {
+  console.log("🚀 OpEx LinkedIn Pipeline started");
+  console.log(`   Mode: ${DRY_RUN ? "DRY RUN (no publishing)" : "PRODUCTION"}`);
+  console.log(`   Date: ${new Date().toISOString()}`);
+
+  const { topic, tone } = getNextTopic();
+  console.log(`\n📌 Topic: ${topic}`);
+  console.log(`   Tone: ${tone}`);
+
+  const research = await researchTopic(topic);
+  console.log(`   ✓ Research complete`);
+  if (research.headline_finding) {
+    console.log(`   → ${research.headline_finding}`);
+  }
+
+  const post = await generatePost(topic, tone, research);
+  console.log(`\n   ✓ Post generated (${post.length} characters)`);
+
+  const result = await publishToLinkedIn(post);
+  console.log(`\n   ✓ ${DRY_RUN ? "Dry run complete" : "Published! ID: " + result.id}`);
+
+  saveLog({
+    date: new Date().toISOString(),
+    topic,
+    tone,
+    post,
+    linkedin_id: result.id,
+    dry_run: DRY_RUN,
+    chars: post.length,
+  });
+
+  console.log("\n✅ Pipeline completed successfully!\n");
+}
+
+main().catch(err => {
+  console.error("\n❌ Pipeline error:", err.message);
+  process.exit(1);
+});

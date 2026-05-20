@@ -1,0 +1,15 @@
+{
+  "name": "linkedin-opex-pipeline",
+  "version": "1.0.0",
+  "description": "Pipeline automatizado de conteúdo OpEx para LinkedIn via GitHub Actions",
+  "type": "module",
+  "scripts": {
+    "start": "node scripts/pipeline.js",
+    "dry-run": "DRY_RUN=true node scripts/pipeline.js",
+    "test": "DRY_RUN=true node scripts/pipeline.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {}
+}
