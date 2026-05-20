@@ -14,15 +14,62 @@ const ROOT = join(__dirname, "..");
 // ─── Config ──────────────────────────────────────────────────────────────────
 const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
 const LINKEDIN_ACCESS_TOKEN = process.env.LINKEDIN_ACCESS_TOKEN;
-const LINKEDIN_PERSON_URN = process.env.LINKEDIN_PERSON_URN; // urn:li:person:XXXXXX
 const DRY_RUN = process.env.DRY_RUN === "true"; // true = generate only, do not publish
 
 if (!ANTHROPIC_API_KEY) throw new Error("ANTHROPIC_API_KEY is not set");
 if (!DRY_RUN && !LINKEDIN_ACCESS_TOKEN) throw new Error("LINKEDIN_ACCESS_TOKEN is not set");
-if (!DRY_RUN && !LINKEDIN_PERSON_URN) throw new Error("LINKEDIN_PERSON_URN is not set");
+
+// ─── Auto-discover LinkedIn Person URN ───────────────────────────────────────
+async function getPersonURN() {
+  // Try cached URN first
+  const cacheFile = join(ROOT, "urn.cache");
+  if (existsSync(cacheFile)) {
+    const cached = readFileSync(cacheFile, "utf8").trim();
+    if (cached.startsWith("urn:li:person:")) {
+      console.log(`   ✓ Using cached URN: ${cached}`);
+      return cached;
+    }
+  }
+
+  console.log("   🔍 Auto-discovering LinkedIn Person URN...");
+
+  // Try /v2/userinfo (OpenID)
+  const endpoints = [
+    { url: "https://api.linkedin.com/v2/userinfo", idField: "sub" },
+    { url: "https://api.linkedin.com/v2/me", idField: "id" },
+    { url: "https://api.linkedin.com/v2/me?projection=(id)", idField: "id" },
+  ];
+
+  for (const { url, idField } of endpoints) {
+    try {
+      const res = await fetch(url, {
+        headers: {
+          "Authorization": `Bearer ${LINKEDIN_ACCESS_TOKEN}`,
+          "X-Restli-Protocol-Version": "2.0.0",
+        },
+      });
+      if (res.ok) {
+        const data = await res.json();
+        const id = data[idField];
+        if (id) {
+          const urn = `urn:li:person:${id}`;
+          writeFileSync(cacheFile, urn);
+          console.log(`   ✓ URN discovered: ${urn}`);
+          return urn;
+        }
+      }
+    } catch {}
+  }
+
+  throw new Error(
+    "Could not auto-discover LinkedIn Person URN. " +
+    "Please set LINKEDIN_PERSON_URN secret manually (e.g. urn:li:person:XXXXXX). " +
+    "You can find your ID by calling: curl -H 'Authorization: Bearer TOKEN' https://api.linkedin.com/v2/userinfo"
+  );
+}
 
 // ─── Topics rotation ─────────────────────────────────────────────────────────
-const TOPICS_FILE = join(ROOT, "topics", "rotation.json");
+const TOPICS_FILE = join(ROOT, "rotation.json");
 
 const DEFAULT_TOPICS = [
   { topic: "Lean Manufacturing & Toyota Production System", tone: "thought_leader" },
@@ -196,6 +243,8 @@ async function publishToLinkedIn(postText) {
 
   console.log("\n📤 Publishing to LinkedIn...");
 
+  const personURN = process.env.LINKEDIN_PERSON_URN || await getPersonURN();
+
   const res = await fetch("https://api.linkedin.com/v2/ugcPosts", {
     method: "POST",
     headers: {
@@ -204,7 +253,7 @@ async function publishToLinkedIn(postText) {
       "X-Restli-Protocol-Version": "2.0.0",
     },
     body: JSON.stringify({
-      author: LINKEDIN_PERSON_URN,
+      author: personURN,
       lifecycleState: "PUBLISHED",
       specificContent: {
         "com.linkedin.ugc.ShareContent": {

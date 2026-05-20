@@ -47,7 +47,7 @@ jobs:
           LINKEDIN_ACCESS_TOKEN: ${{ secrets.LINKEDIN_ACCESS_TOKEN }}
           LINKEDIN_PERSON_URN: ${{ secrets.LINKEDIN_PERSON_URN }}
           DRY_RUN: ${{ github.event.inputs.dry_run || 'false' }}
-        run: node scripts/pipeline.js
+        run: node pipeline.js
 
       # 5. Upload log as artifact (useful for debugging)
       - name: Upload log artifact
@@ -63,6 +63,6 @@ jobs:
         uses: stefanzweifel/git-auto-commit-action@v5
         with:
           commit_message: "chore: update topic rotation state [skip ci]"
-          file_pattern: "topics/rotation.json"
+          file_pattern: "rotation.json"
           commit_user_name: "OpEx Bot"
           commit_user_email: "opex-bot@noreply.github.com"
