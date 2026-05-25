@@ -1,0 +1,72 @@
+name: OpEx LinkedIn Pipeline
+
+on:
+  # ── Automatic schedule ──────────────────────────────────────────────
+  # Runs Monday, Wednesday and Friday at 09:00 AM BRT (12:00 UTC)
+  schedule:
+    - cron: "0 12 * * 1,3,5"
+
+  # ── Manual trigger (with dry run option) ────────────────────────────
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Dry run? (true = generate post only, do not publish)"
+        required: false
+        default: "false"
+        type: choice
+        options:
+          - "false"
+          - "true"
+
+jobs:
+  post:
+    name: Generate and Publish OpEx Post
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      # 1. Checkout repository
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # 2. Setup Node.js
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      # 3. Install canvas system dependencies
+      - name: Install canvas system dependencies
+        run: sudo apt-get install -y libcairo2-dev libpango1.0-dev libjpeg-dev libgif-dev librsvg2-dev
+
+      # 4. Install Node dependencies
+      - name: Install dependencies
+        run: npm install
+
+      # 4. Run the pipeline
+      - name: Run OpEx pipeline
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          LINKEDIN_ACCESS_TOKEN: ${{ secrets.LINKEDIN_ACCESS_TOKEN }}
+          LINKEDIN_PERSON_URN: ${{ secrets.LINKEDIN_PERSON_URN }}
+          DRY_RUN: ${{ github.event.inputs.dry_run || 'false' }}
+        run: node scripts/pipeline.js
+
+      # 5. Upload log as artifact (useful for debugging)
+      - name: Upload log artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pipeline-log-${{ github.run_number }}
+          path: logs/
+          retention-days: 30
+
+      # 6. Commit topic rotation state
+      - name: Commit rotation state
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: "chore: update topic rotation state [skip ci]"
+          file_pattern: "topics/rotation.json"
+          commit_user_name: "OpEx Bot"
+          commit_user_email: "opex-bot@noreply.github.com"
