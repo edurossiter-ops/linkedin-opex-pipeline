@@ -273,94 +273,49 @@ Return ONLY the post text, ready to publish. No additional commentary.`
   return extractText(data);
 }
 
-// ─── Step 3: Generate infographic image ──────────────────────────────────────
+// ─── Step 3: Generate image with Flux (Together AI) ─────────────────────────
 async function generateImage(topic, research) {
-  console.log("\n🎨 Generating infographic...");
+  console.log("\n🎨 Generating image with Flux...");
+
+  const TOGETHER_API_KEY = process.env.TOGETHER_AI_KEY;
+  if (!TOGETHER_API_KEY) {
+    console.warn("   ⚠ TOGETHER_AI_KEY not set — skipping image");
+    return null;
+  }
 
   try {
-    const { createCanvas } = await import("canvas");
+    const headline = (research.headline_finding || topic).slice(0, 100);
+    const prompt = `Professional corporate photography, industrial operations scene: ${headline}. Modern factory floor with advanced machinery, blue ambient lighting, photorealistic, cinematic composition, 4k, no text, no words, no labels`;
 
-    const W = 1200, H = 627;
-    const canvas = createCanvas(W, H);
-    const ctx = canvas.getContext("2d");
+    const res = await fetch("https://api.together.xyz/v1/images/generations", {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${TOGETHER_API_KEY}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model: "black-forest-labs/FLUX.1-schnell-Free",
+        prompt,
+        width: 1216,
+        height: 832,
+        steps: 4,
+        n: 1,
+        response_format: "b64_json",
+      }),
+    });
 
-    // Background
-    ctx.fillStyle = "#0a0f1e";
-    ctx.fillRect(0, 0, W, H);
-
-    // Accent bar left
-    const grad = ctx.createLinearGradient(0, 0, 0, H);
-    grad.addColorStop(0, "#0077b5");
-    grad.addColorStop(1, "#00c6ff");
-    ctx.fillStyle = grad;
-    ctx.fillRect(0, 0, 8, H);
-
-    // Top label
-    ctx.fillStyle = "#0077b5";
-    ctx.font = "bold 18px sans-serif";
-    ctx.fillText("OPERATIONAL EXCELLENCE", 48, 52);
-
-    // Divider line
-    ctx.strokeStyle = "#1e3a5f";
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    ctx.moveTo(48, 68);
-    ctx.lineTo(W - 48, 68);
-    ctx.stroke();
-
-    // Headline finding — wrap text
-    const headline = research.headline_finding || topic;
-    ctx.fillStyle = "#ffffff";
-    ctx.font = "bold 38px sans-serif";
-    const words = headline.split(" ");
-    let line = "", y = 130, maxW = W - 96;
-    for (const word of words) {
-      const test = line + (line ? " " : "") + word;
-      if (ctx.measureText(test).width > maxW && line) {
-        ctx.fillText(line, 48, y);
-        line = word;
-        y += 52;
-        if (y > 280) { ctx.fillText(line + "...", 48, y); line = ""; break; }
-      } else { line = test; }
-    }
-    if (line) ctx.fillText(line, 48, y);
-
-    // Key stat box
-    const stat = (research.key_stats && research.key_stats[0]) || "";
-    if (stat) {
-      ctx.fillStyle = "#0d1f3c";
-      ctx.beginPath();
-      ctx.roundRect(48, 310, W - 96, 90, 8);
-      ctx.fill();
-
-      ctx.fillStyle = "#00c6ff";
-      ctx.font = "bold 14px sans-serif";
-      ctx.fillText("KEY STAT", 72, 342);
-
-      ctx.fillStyle = "#c8d8e8";
-      ctx.font = "16px sans-serif";
-      const statShort = stat.length > 100 ? stat.slice(0, 100) + "..." : stat;
-      ctx.fillText(statShort, 72, 370);
+    if (!res.ok) {
+      const err = await res.text();
+      throw new Error(`Together AI error ${res.status}: ${err}`);
     }
 
-    // Source
-    const source = research.source_name || "";
-    if (source) {
-      ctx.fillStyle = "#4a7fa5";
-      ctx.font = "14px sans-serif";
-      ctx.fillText(`Source: ${source}`, 48, 440);
-    }
+    const data = await res.json();
+    const b64 = data.data?.[0]?.b64_json;
+    if (!b64) throw new Error("No image returned from Together AI");
 
-    // Topic tag bottom
-    ctx.fillStyle = "#0077b5";
-    ctx.font = "bold 15px sans-serif";
-    ctx.fillText(`#OperationalExcellence  #OpEx  #${topic.split(" ")[0]}`, 48, H - 40);
-
-    // Export PNG
     const imgPath = join(ROOT, "post-image.png");
-    const buffer = canvas.toBuffer("image/png");
-    writeFileSync(imgPath, buffer);
-    console.log(`   ✓ Image saved (${Math.round(buffer.length / 1024)}KB)`);
+    writeFileSync(imgPath, Buffer.from(b64, "base64"));
+    console.log(`   ✓ Image generated and saved`);
     return imgPath;
 
   } catch (err) {
@@ -368,6 +323,7 @@ async function generateImage(topic, research) {
     return null;
   }
 }
+
 
 // ─── Step 4: Upload image to LinkedIn ────────────────────────────────────────
 async function uploadImageToLinkedIn(imagePath, personURN) {

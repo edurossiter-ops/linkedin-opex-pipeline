@@ -11,7 +11,5 @@
   "engines": {
     "node": ">=20"
   },
-  "dependencies": {
-    "canvas": "^2.11.2"
-  }
+  "dependencies": {}
 }
