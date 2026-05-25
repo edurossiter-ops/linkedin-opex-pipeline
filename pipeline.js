@@ -277,8 +277,8 @@ Return ONLY the post text, ready to publish. No additional commentary.`
 async function generateImage(topic, research) {
   console.log("\n🎨 Generating image with Flux...");
 
-  const TOGETHER_API_KEY = process.env.TOGETHER_AI_KEY;
-  if (!TOGETHER_API_KEY) {
+  const TOGETHER_AI_KEY = process.env.TOGETHER_AI_KEY;
+  if (!TOGETHER_AI_KEY) {
     console.warn("   ⚠ TOGETHER_AI_KEY not set — skipping image");
     return null;
   }
@@ -290,7 +290,7 @@ async function generateImage(topic, research) {
     const res = await fetch("https://api.together.xyz/v1/images/generations", {
       method: "POST",
       headers: {
-        "Authorization": `Bearer ${TOGETHER_API_KEY}`,
+        "Authorization": `Bearer ${TOGETHER_AI_KEY}`,
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
