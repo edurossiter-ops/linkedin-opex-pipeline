@@ -273,19 +273,175 @@ Return ONLY the post text, ready to publish. No additional commentary.`
   return extractText(data);
 }
 
-// ─── Step 3: Publish to LinkedIn ──────────────────────────────────────────────
-async function publishToLinkedIn(postText) {
+// ─── Step 3: Generate infographic image ──────────────────────────────────────
+async function generateImage(topic, research) {
+  console.log("\n🎨 Generating infographic...");
+
+  try {
+    const { createCanvas } = await import("canvas");
+
+    const W = 1200, H = 627;
+    const canvas = createCanvas(W, H);
+    const ctx = canvas.getContext("2d");
+
+    // Background
+    ctx.fillStyle = "#0a0f1e";
+    ctx.fillRect(0, 0, W, H);
+
+    // Accent bar left
+    const grad = ctx.createLinearGradient(0, 0, 0, H);
+    grad.addColorStop(0, "#0077b5");
+    grad.addColorStop(1, "#00c6ff");
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, 8, H);
+
+    // Top label
+    ctx.fillStyle = "#0077b5";
+    ctx.font = "bold 18px sans-serif";
+    ctx.fillText("OPERATIONAL EXCELLENCE", 48, 52);
+
+    // Divider line
+    ctx.strokeStyle = "#1e3a5f";
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(48, 68);
+    ctx.lineTo(W - 48, 68);
+    ctx.stroke();
+
+    // Headline finding — wrap text
+    const headline = research.headline_finding || topic;
+    ctx.fillStyle = "#ffffff";
+    ctx.font = "bold 38px sans-serif";
+    const words = headline.split(" ");
+    let line = "", y = 130, maxW = W - 96;
+    for (const word of words) {
+      const test = line + (line ? " " : "") + word;
+      if (ctx.measureText(test).width > maxW && line) {
+        ctx.fillText(line, 48, y);
+        line = word;
+        y += 52;
+        if (y > 280) { ctx.fillText(line + "...", 48, y); line = ""; break; }
+      } else { line = test; }
+    }
+    if (line) ctx.fillText(line, 48, y);
+
+    // Key stat box
+    const stat = (research.key_stats && research.key_stats[0]) || "";
+    if (stat) {
+      ctx.fillStyle = "#0d1f3c";
+      ctx.beginPath();
+      ctx.roundRect(48, 310, W - 96, 90, 8);
+      ctx.fill();
+
+      ctx.fillStyle = "#00c6ff";
+      ctx.font = "bold 14px sans-serif";
+      ctx.fillText("KEY STAT", 72, 342);
+
+      ctx.fillStyle = "#c8d8e8";
+      ctx.font = "16px sans-serif";
+      const statShort = stat.length > 100 ? stat.slice(0, 100) + "..." : stat;
+      ctx.fillText(statShort, 72, 370);
+    }
+
+    // Source
+    const source = research.source_name || "";
+    if (source) {
+      ctx.fillStyle = "#4a7fa5";
+      ctx.font = "14px sans-serif";
+      ctx.fillText(`Source: ${source}`, 48, 440);
+    }
+
+    // Topic tag bottom
+    ctx.fillStyle = "#0077b5";
+    ctx.font = "bold 15px sans-serif";
+    ctx.fillText(`#OperationalExcellence  #OpEx  #${topic.split(" ")[0]}`, 48, H - 40);
+
+    // Export PNG
+    const imgPath = join(ROOT, "post-image.png");
+    const buffer = canvas.toBuffer("image/png");
+    writeFileSync(imgPath, buffer);
+    console.log(`   ✓ Image saved (${Math.round(buffer.length / 1024)}KB)`);
+    return imgPath;
+
+  } catch (err) {
+    console.warn(`   ⚠ Image generation failed: ${err.message} — posting without image`);
+    return null;
+  }
+}
+
+// ─── Step 4: Upload image to LinkedIn ────────────────────────────────────────
+async function uploadImageToLinkedIn(imagePath, personURN) {
+  console.log("\n📸 Uploading image to LinkedIn...");
+
+  // 1. Register upload
+  const registerRes = await fetch("https://api.linkedin.com/v2/assets?action=registerUpload", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "Authorization": `Bearer ${LINKEDIN_ACCESS_TOKEN}`,
+      "X-Restli-Protocol-Version": "2.0.0",
+    },
+    body: JSON.stringify({
+      registerUploadRequest: {
+        recipes: ["urn:li:digitalmediaRecipe:feedshare-image"],
+        owner: personURN,
+        serviceRelationships: [{
+          relationshipType: "OWNER",
+          identifier: "urn:li:userGeneratedContent"
+        }]
+      }
+    })
+  });
+
+  if (!registerRes.ok) {
+    const err = await registerRes.text();
+    throw new Error(`LinkedIn register upload error: ${err}`);
+  }
+
+  const registerData = await registerRes.json();
+  const uploadUrl = registerData.value.uploadMechanism["com.linkedin.digitalmedia.uploading.MediaUploadHttpRequest"].uploadUrl;
+  const asset = registerData.value.asset;
+
+  // 2. Upload the image bytes
+  const imageBuffer = readFileSync(imagePath);
+  const uploadRes = await fetch(uploadUrl, {
+    method: "PUT",
+    headers: {
+      "Authorization": `Bearer ${LINKEDIN_ACCESS_TOKEN}`,
+      "Content-Type": "image/png",
+    },
+    body: imageBuffer,
+  });
+
+  if (!uploadRes.ok) {
+    const err = await uploadRes.text();
+    throw new Error(`LinkedIn image upload error: ${err}`);
+  }
+
+  console.log(`   ✓ Image uploaded: ${asset}`);
+  return asset;
+}
+
+// ─── Step 5: Publish to LinkedIn ──────────────────────────────────────────────
+async function publishToLinkedIn(postText, imageAsset, personURN) {
   if (DRY_RUN) {
     console.log("\n[DRY RUN] Post that would be published:\n");
     console.log("─".repeat(60));
     console.log(postText);
     console.log("─".repeat(60));
+    console.log(imageAsset ? "[With image]" : "[No image]");
     return { id: "dry-run-" + Date.now() };
   }
 
   console.log("\n📤 Publishing to LinkedIn...");
 
-  const personURN = process.env.LINKEDIN_PERSON_URN || await getPersonURN();
+  const mediaCategory = imageAsset ? "IMAGE" : "NONE";
+  const media = imageAsset ? [{
+    status: "READY",
+    description: { text: "OpEx Infographic" },
+    media: imageAsset,
+    title: { text: postText.split("\n")[0].slice(0, 70) }
+  }] : [];
 
   const res = await fetch("https://api.linkedin.com/v2/ugcPosts", {
     method: "POST",
@@ -300,7 +456,8 @@ async function publishToLinkedIn(postText) {
       specificContent: {
         "com.linkedin.ugc.ShareContent": {
           shareCommentary: { text: postText },
-          shareMediaCategory: "NONE",
+          shareMediaCategory: mediaCategory,
+          ...(media.length > 0 && { media }),
         },
       },
       visibility: {
@@ -349,7 +506,11 @@ async function main() {
   const post = await generatePost(topic, tone, research);
   console.log(`\n   ✓ Post generated (${post.length} characters)`);
 
-  const result = await publishToLinkedIn(post);
+  const personURN = DRY_RUN ? "dry-run" : (process.env.LINKEDIN_PERSON_URN || await getPersonURN());
+  const imagePath = await generateImage(topic, research);
+  const imageAsset = (imagePath && !DRY_RUN) ? await uploadImageToLinkedIn(imagePath, personURN) : null;
+
+  const result = await publishToLinkedIn(post, imageAsset, personURN);
   console.log(`\n   ✓ ${DRY_RUN ? "Dry run complete" : "Published! ID: " + result.id}`);
 
   saveLog({
@@ -360,6 +521,7 @@ async function main() {
     linkedin_id: result.id,
     dry_run: DRY_RUN,
     chars: post.length,
+    with_image: !!imageAsset,
   });
 
   console.log("\n✅ Pipeline completed successfully!\n");
