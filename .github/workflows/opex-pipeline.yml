@@ -48,7 +48,7 @@ jobs:
           LINKEDIN_PERSON_URN: ${{ secrets.LINKEDIN_PERSON_URN }}
           TOGETHER_AI_KEY: ${{ secrets.TOGETHER_AI_KEY }}
           DRY_RUN: ${{ github.event.inputs.dry_run || 'false' }}
-        run: node scripts/pipeline.js
+        run: node pipeline.js
 
       # 5. Upload log as artifact (useful for debugging)
       - name: Upload log artifact
