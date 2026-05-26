@@ -273,49 +273,50 @@ Return ONLY the post text, ready to publish. No additional commentary.`
   return extractText(data);
 }
 
-// ─── Step 3: Generate image with Flux (Together AI) ─────────────────────────
+// ─── Step 3: Generate image with fal.ai (FLUX.1 schnell) ────────────────────
 async function generateImage(topic, research) {
-  console.log("\n🎨 Generating image with Flux...");
+  console.log("\n🎨 Generating image with fal.ai Flux...");
 
-  const TOGETHER_AI_KEY = process.env.TOGETHER_AI_KEY;
-  if (!TOGETHER_AI_KEY) {
-    console.warn("   ⚠ TOGETHER_AI_KEY not set — skipping image");
+  const FAL_KEY = process.env.FAL_KEY;
+  if (!FAL_KEY) {
+    console.warn("   ⚠ FAL_KEY not set — skipping image");
     return null;
   }
 
   try {
     const headline = (research.headline_finding || topic).slice(0, 100);
-    const prompt = `Professional corporate photography, industrial operations scene: ${headline}. Modern factory floor with advanced machinery, blue ambient lighting, photorealistic, cinematic composition, 4k, no text, no words, no labels`;
+    const prompt = `Professional industrial photography: ${headline}. Modern factory floor, advanced manufacturing machinery, blue ambient lighting, cinematic composition, photorealistic, 4k quality, no text, no words, no labels, no people`;
 
-    const res = await fetch("https://api.together.xyz/v1/images/generations", {
+    const res = await fetch("https://fal.run/fal-ai/flux/schnell", {
       method: "POST",
       headers: {
-        "Authorization": `Bearer ${TOGETHER_AI_KEY}`,
+        "Authorization": `Key ${FAL_KEY}`,
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        model: "black-forest-labs/FLUX.1-schnell-Free",
         prompt,
-        width: 1216,
-        height: 832,
-        steps: 4,
-        n: 1,
-        response_format: "b64_json",
+        image_size: "landscape_16_9",
+        num_inference_steps: 4,
+        num_images: 1,
+        enable_safety_checker: false,
       }),
     });
 
     if (!res.ok) {
       const err = await res.text();
-      throw new Error(`Together AI error ${res.status}: ${err}`);
+      throw new Error(`fal.ai error ${res.status}: ${err}`);
     }
 
     const data = await res.json();
-    const b64 = data.data?.[0]?.b64_json;
-    if (!b64) throw new Error("No image returned from Together AI");
+    const imageUrl = data.images?.[0]?.url;
+    if (!imageUrl) throw new Error("No image URL returned from fal.ai");
 
+    // Download the image
+    const imgRes = await fetch(imageUrl);
+    const buffer = Buffer.from(await imgRes.arrayBuffer());
     const imgPath = join(ROOT, "post-image.png");
-    writeFileSync(imgPath, Buffer.from(b64, "base64"));
-    console.log(`   ✓ Image generated and saved`);
+    writeFileSync(imgPath, buffer);
+    console.log(`   ✓ Image generated and saved (${Math.round(buffer.length / 1024)}KB)`);
     return imgPath;
 
   } catch (err) {
