@@ -98,7 +98,7 @@ function getNextTopic() {
 }
 
 // ─── Claude API call ──────────────────────────────────────────────────────────
-async function callClaude({ messages, tools, system, max_tokens = 1500 }) {
+async function callClaude({ messages, tools, system, max_tokens = 1500 }, retries = 3) {
   const body = {
     model: "claude-sonnet-4-20250514",
     max_tokens,
@@ -107,22 +107,39 @@ async function callClaude({ messages, tools, system, max_tokens = 1500 }) {
     ...(tools && { tools }),
   };
 
-  const res = await fetch("https://api.anthropic.com/v1/messages", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "x-api-key": ANTHROPIC_API_KEY,
-      "anthropic-version": "2023-06-01",
-      "anthropic-beta": "web-search-2025-03-05",
-    },
-    body: JSON.stringify(body),
-  });
+  for (let attempt = 1; attempt <= retries; attempt++) {
+    try {
+      const res = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-api-key": ANTHROPIC_API_KEY,
+          "anthropic-version": "2023-06-01",
+          "anthropic-beta": "web-search-2025-03-05",
+        },
+        body: JSON.stringify(body),
+      });
 
-  if (!res.ok) {
-    const err = await res.text();
-    throw new Error(`Claude API error ${res.status}: ${err}`);
+      if (res.ok) return res.json();
+
+      const err = await res.text();
+      // Retry on 5xx server errors
+      if (res.status >= 500 && attempt < retries) {
+        const wait = attempt * 5000;
+        console.warn(`   ⚠ Claude API ${res.status} — retrying in ${wait/1000}s (attempt ${attempt}/${retries})`);
+        await new Promise(r => setTimeout(r, wait));
+        continue;
+      }
+      throw new Error(`Claude API error ${res.status}: ${err}`);
+    } catch (err) {
+      if (attempt < retries && err.message.includes("fetch")) {
+        console.warn(`   ⚠ Network error — retrying (attempt ${attempt}/${retries})`);
+        await new Promise(r => setTimeout(r, attempt * 3000));
+        continue;
+      }
+      throw err;
+    }
   }
-  return res.json();
 }
 
 function extractText(data) {
