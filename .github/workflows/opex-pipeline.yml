@@ -46,7 +46,7 @@ jobs:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           LINKEDIN_ACCESS_TOKEN: ${{ secrets.LINKEDIN_ACCESS_TOKEN }}
           LINKEDIN_PERSON_URN: ${{ secrets.LINKEDIN_PERSON_URN }}
-          TOGETHER_AI_KEY: ${{ secrets.TOGETHER_AI_KEY }}
+          FAL_KEY: ${{ secrets.FAL_KEY }}
           DRY_RUN: ${{ github.event.inputs.dry_run || 'false' }}
         run: node pipeline.js
 
