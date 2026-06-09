@@ -50,6 +50,7 @@ jobs:
           LINKEDIN_ACCESS_TOKEN: ${{ secrets.LINKEDIN_ACCESS_TOKEN }}
           LINKEDIN_PERSON_URN: ${{ secrets.LINKEDIN_PERSON_URN }}
           FAL_KEY: ${{ secrets.FAL_KEY }}
+          SITE_REPO_TOKEN: ${{ secrets.SITE_REPO_TOKEN }}
           DRY_RUN: ${{ github.event.inputs.dry_run || 'false' }}
         run: node pipeline.js
 
