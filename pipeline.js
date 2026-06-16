@@ -100,7 +100,7 @@ function getNextTopic() {
 // ─── Claude API call ──────────────────────────────────────────────────────────
 async function callClaude({ messages, tools, system, max_tokens = 1500 }, retries = 3) {
   const body = {
-    model: "claude-sonnet-4-20250514",
+    model: "claude-sonnet-4-6",
     max_tokens,
     messages,
     ...(system && { system }),
@@ -302,7 +302,7 @@ async function generateImage(topic, research) {
     const page = await browser.newPage();
     await page.setViewport({ width: 1200, height: 627, deviceScaleFactor: 2 });
 
-    const headline = (research.headline_finding || topic).slice(0, 110);
+    const headline = (research.headline_finding || topic).slice(0, 80);
     const stat = (research.key_stats?.[0] || "").slice(0, 120);
     const topicLabel = topic.split("&")[0].trim().toUpperCase();
 
@@ -377,11 +377,12 @@ body {
 
 /* ── Headline ── */
 .headline {
-  font-size:38px; font-weight:900; line-height:1.18;
+  font-size:clamp(38px, 5.5vw, 64px); font-weight:900; line-height:1.1;
   color:#ffffff;
-  max-width:820px;
-  letter-spacing:-0.01em;
+  max-width:960px;
+  letter-spacing:-0.02em;
   flex:1; display:flex; align-items:center;
+  overflow:hidden;
 }
 .headline em {
   font-style:normal;
