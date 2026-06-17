@@ -625,13 +625,28 @@ REGRAS:
 - 450 a 700 palavras, com 2 a 4 subtítulos markdown (##).
 - Tom de quem domina o assunto e quer ensinar, não vender.
 
-Retorne SOMENTE JSON válido: {"title":"...","excerpt":"...(<=160 chars)","body":"...markdown..."}`
+FORMATO DE SAÍDA — responda EXATAMENTE neste formato, nada antes nem depois:
+TITULO: <titulo em uma linha>
+RESUMO: <resumo de ate 160 caracteres em uma linha>
+---CORPO---
+<o artigo em markdown, com ## subtitulos e paragrafos>`
     }],
     max_tokens: 1800,
   });
-  const m = extractText(data).match(/\{[\s\S]*\}/);
-  if (!m) throw new Error("blog pt-BR JSON parse failed");
-  return JSON.parse(m[0]);
+  // Parse por delimitador (imune a escape de JSON: o corpo markdown tem quebras de linha e aspas).
+  const text = extractText(data);
+  const MARK = "---CORPO---";
+  const sep = text.indexOf(MARK);
+  if (sep === -1) throw new Error("blog pt-BR: marcador ---CORPO--- ausente na resposta");
+  const head = text.slice(0, sep);
+  let body = text.slice(sep + MARK.length).trim();
+  body = body.replace(/^```(?:markdown)?\s*/i, "").replace(/\s*```$/, "").trim();
+  const title = (head.match(/TITULO:\s*(.+)/i) || [])[1]?.trim();
+  const excerpt = (head.match(/RESUMO:\s*(.+)/i) || [])[1]?.trim();
+  if (!title) throw new Error("blog pt-BR: TITULO ausente na resposta");
+  if (!body) throw new Error("blog pt-BR: corpo vazio na resposta");
+  const fallbackExcerpt = body.replace(/[#*_>`]/g, " ").replace(/\s+/g, " ").trim();
+  return { title, excerpt: (excerpt || fallbackExcerpt).slice(0, 160), body };
 }
 async function ghGet(path) {
   const res = await fetch(`https://api.github.com/repos/${SITE_REPO}/contents/${path}`, {
