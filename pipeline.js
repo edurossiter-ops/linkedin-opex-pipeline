@@ -368,13 +368,13 @@ body {
   background:rgba(58,114,200,0.25);
   border:1px solid rgba(58,114,200,0.5);
   border-radius:6px;
-  padding:10px 22px;
-  font-size:16px; font-weight:700;
+  padding:12px 24px;
+  font-size:20px; font-weight:700;
   letter-spacing:0.14em; color:#b8e8ff;
   text-transform:uppercase;
 }
 .logo {
-  font-size:16px; font-weight:700;
+  font-size:20px; font-weight:700;
   letter-spacing:0.18em; color:#4a78a8;
   text-transform:uppercase;
 }
@@ -407,11 +407,11 @@ body {
   padding:18px 24px;
 }
 .stat-label {
-  font-size:13px; font-weight:700; color:#3a72c8;
+  font-size:16px; font-weight:700; color:#3a72c8;
   letter-spacing:0.18em; text-transform:uppercase; margin-bottom:10px;
 }
 .stat-value {
-  font-size:18px; color:#c8dcf0; line-height:1.5; font-weight:400;
+  font-size:22px; color:#c8dcf0; line-height:1.5; font-weight:400;
 }
 
 /* ── Bottom ── */
@@ -421,10 +421,10 @@ body {
   padding-top:16px;
 }
 .tagline {
-  font-size:18px; color:#7a9ab8; font-style:italic; font-weight:400;
+  font-size:20px; color:#7a9ab8; font-style:italic; font-weight:400;
 }
 .hashtags {
-  font-size:18px; color:#3a72c8; font-weight:700; letter-spacing:0.03em;
+  font-size:20px; color:#3a72c8; font-weight:700; letter-spacing:0.03em;
 }
 </style>
 </head>
