@@ -302,7 +302,11 @@ async function generateImage(topic, research) {
     const page = await browser.newPage();
     await page.setViewport({ width: 1200, height: 627, deviceScaleFactor: 2 });
 
-    const headline = (research.headline_finding || topic).slice(0, 80);
+    const headlineRaw = (research.headline_finding || topic);
+    // Cut at word boundary around 72 chars so title never truncates mid-word
+    const headline = headlineRaw.length > 72
+      ? headlineRaw.slice(0, headlineRaw.lastIndexOf(' ', 72)) 
+      : headlineRaw;
     const stat = (research.key_stats?.[0] || "").slice(0, 120);
     const topicLabel = topic.split("&")[0].trim().toUpperCase();
 
@@ -417,10 +421,10 @@ body {
   padding-top:16px;
 }
 .tagline {
-  font-size:16px; color:#4a78a8; font-style:italic; font-weight:300;
+  font-size:18px; color:#7a9ab8; font-style:italic; font-weight:400;
 }
 .hashtags {
-  font-size:15px; color:#3a72c8; font-weight:600; letter-spacing:0.03em;
+  font-size:18px; color:#3a72c8; font-weight:700; letter-spacing:0.03em;
 }
 </style>
 </head>
