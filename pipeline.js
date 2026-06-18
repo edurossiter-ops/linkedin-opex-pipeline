@@ -363,21 +363,21 @@ body {
 .topic-badge {
   background:rgba(58,114,200,0.25);
   border:1px solid rgba(58,114,200,0.5);
-  border-radius:4px;
-  padding:5px 14px;
-  font-size:11px; font-weight:700;
+  border-radius:6px;
+  padding:10px 22px;
+  font-size:16px; font-weight:700;
   letter-spacing:0.14em; color:#b8e8ff;
   text-transform:uppercase;
 }
 .logo {
-  font-size:12px; font-weight:700;
+  font-size:16px; font-weight:700;
   letter-spacing:0.18em; color:#4a78a8;
   text-transform:uppercase;
 }
 
 /* ── Headline ── */
 .headline {
-  font-size:clamp(38px, 5.5vw, 64px); font-weight:900; line-height:1.1;
+  font-size:clamp(44px, 5.5vw, 68px); font-weight:900; line-height:1.1;
   color:#ffffff;
   max-width:960px;
   letter-spacing:-0.02em;
@@ -398,29 +398,29 @@ body {
   flex:1;
   background:rgba(58,114,200,0.12);
   border:1px solid rgba(74,120,168,0.35);
-  border-left:3px solid #3a72c8;
+  border-left:4px solid #3a72c8;
   border-radius:6px;
-  padding:14px 20px;
+  padding:18px 24px;
 }
 .stat-label {
-  font-size:9px; font-weight:700; color:#3a72c8;
-  letter-spacing:0.18em; text-transform:uppercase; margin-bottom:7px;
+  font-size:13px; font-weight:700; color:#3a72c8;
+  letter-spacing:0.18em; text-transform:uppercase; margin-bottom:10px;
 }
 .stat-value {
-  font-size:13.5px; color:#c8dcf0; line-height:1.5; font-weight:400;
+  font-size:18px; color:#c8dcf0; line-height:1.5; font-weight:400;
 }
 
 /* ── Bottom ── */
 .bottom {
   display:flex; align-items:center; justify-content:space-between;
   border-top:1px solid rgba(74,120,168,0.2);
-  padding-top:14px;
+  padding-top:16px;
 }
 .tagline {
-  font-size:12px; color:#4a78a8; font-style:italic; font-weight:300;
+  font-size:16px; color:#4a78a8; font-style:italic; font-weight:300;
 }
 .hashtags {
-  font-size:11.5px; color:#3a72c8; font-weight:600; letter-spacing:0.03em;
+  font-size:15px; color:#3a72c8; font-weight:600; letter-spacing:0.03em;
 }
 </style>
 </head>
@@ -591,98 +591,6 @@ function saveLog(entry) {
   } catch {}
 }
 
-// ─── Blog (pt-BR) → repo do site (additivo; nunca quebra o LinkedIn) ─────────
-const SITE_REPO = "edurossiter-ops/rossiter.de";
-const SITE_TOKEN = process.env.SITE_REPO_TOKEN;
-const BLOG_COVERS = [
-  "../assets/img/09_blog_engrenagem.webp",
-  "../assets/img/08_blog_aco.webp",
-  "../assets/img/02_metrologia.webp",
-  "../assets/img/06_opex_spc.webp",
-  "../assets/img/03_manometro.webp",
-];
-const b64 = (s) => Buffer.from(s, "utf8").toString("base64");
-function slugify(s) {
-  return s.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "")
-    .replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 60);
-}
-async function generateBlogPtBr(topic, postEn, research) {
-  const ctx = research && research.raw ? research.raw.slice(0, 600) : JSON.stringify(research || {}, null, 2);
-  const data = await callClaude({
-    messages: [{ role: "user", content:
-`Você é Eduardo Rossiter, consultor de excelência operacional para a indústria PME. Reescreva o conteúdo abaixo como um ARTIGO DE BLOG em PORTUGUÊS DO BRASIL.
-
-CONTEÚDO (post em inglês do LinkedIn):
-${postEn}
-
-CONTEXTO:
-${ctx}
-
-REGRAS:
-- 1ª pessoa ("eu"), sóbrio com atitude, sem corporativês.
-- SEM hashtags, SEM emojis, SEM bullets com hífen/asterisco.
-- Proibido léxico de "vazamento" (ralo, furo, "o lucro vaza"); use "margem escondida/presa", "enxergar e recuperar".
-- 450 a 700 palavras, com 2 a 4 subtítulos markdown (##).
-- Tom de quem domina o assunto e quer ensinar, não vender.
-
-FORMATO DE SAÍDA — responda EXATAMENTE neste formato, nada antes nem depois:
-TITULO: <titulo em uma linha>
-RESUMO: <resumo de ate 160 caracteres em uma linha>
----CORPO---
-<o artigo em markdown, com ## subtitulos e paragrafos>`
-    }],
-    max_tokens: 1800,
-  });
-  // Parse por delimitador (imune a escape de JSON: o corpo markdown tem quebras de linha e aspas).
-  const text = extractText(data);
-  const MARK = "---CORPO---";
-  const sep = text.indexOf(MARK);
-  if (sep === -1) throw new Error("blog pt-BR: marcador ---CORPO--- ausente na resposta");
-  const head = text.slice(0, sep);
-  let body = text.slice(sep + MARK.length).trim();
-  body = body.replace(/^```(?:markdown)?\s*/i, "").replace(/\s*```$/, "").trim();
-  const title = (head.match(/TITULO:\s*(.+)/i) || [])[1]?.trim();
-  const excerpt = (head.match(/RESUMO:\s*(.+)/i) || [])[1]?.trim();
-  if (!title) throw new Error("blog pt-BR: TITULO ausente na resposta");
-  if (!body) throw new Error("blog pt-BR: corpo vazio na resposta");
-  const fallbackExcerpt = body.replace(/[#*_>`]/g, " ").replace(/\s+/g, " ").trim();
-  return { title, excerpt: (excerpt || fallbackExcerpt).slice(0, 160), body };
-}
-async function ghGet(path) {
-  const res = await fetch(`https://api.github.com/repos/${SITE_REPO}/contents/${path}`, {
-    headers: { Authorization: `Bearer ${SITE_TOKEN}`, Accept: "application/vnd.github+json", "User-Agent": "rossiter-pipeline" },
-  });
-  if (res.status === 404) return null;
-  if (!res.ok) throw new Error(`GitHub GET ${path}: ${res.status}`);
-  return res.json();
-}
-async function ghPut(path, contentB64, message, sha) {
-  const res = await fetch(`https://api.github.com/repos/${SITE_REPO}/contents/${path}`, {
-    method: "PUT",
-    headers: { Authorization: `Bearer ${SITE_TOKEN}`, Accept: "application/vnd.github+json", "User-Agent": "rossiter-pipeline" },
-    body: JSON.stringify({ message, content: contentB64, ...(sha && { sha }) }),
-  });
-  if (!res.ok) throw new Error(`GitHub PUT ${path}: ${res.status} ${await res.text()}`);
-  return res.json();
-}
-async function publishToBlog(topic, postEn, research) {
-  if (!SITE_TOKEN) { console.log("   ℹ SITE_REPO_TOKEN ausente — pulando blog (LinkedIn não afetado)."); return; }
-  if (DRY_RUN) { console.log("   ℹ DRY_RUN — não publica no blog."); return; }
-  console.log("\n📝 Gerando versão pt-BR para o blog...");
-  const art = await generateBlogPtBr(topic, postEn, research);
-  const date = new Date().toISOString().slice(0, 10);
-  const slug = `${date}-${slugify(art.title)}`;
-  const words = (art.body || "").split(/\s+/).length;
-  const cover = BLOG_COVERS[new Date().getDate() % BLOG_COVERS.length];
-  await ghPut(`blog/posts/${slug}.md`, b64(String(art.body).trim() + "\n"), `blog: ${art.title}`);
-  const cur = await ghGet("blog/posts.json");
-  let list = [];
-  if (cur && cur.content) { try { list = JSON.parse(Buffer.from(cur.content, "base64").toString("utf8")); } catch {} }
-  list.unshift({ slug, title: art.title, date, excerpt: String(art.excerpt || "").slice(0, 160), image: cover, readingTime: Math.max(2, Math.round(words / 200)) + " min" });
-  await ghPut("blog/posts.json", b64(JSON.stringify(list, null, 2) + "\n"), `blog: index ${slug}`, cur && cur.sha);
-  console.log(`   ✓ Publicado no blog (pt-BR): ${slug}`);
-}
-
 // ─── Main ─────────────────────────────────────────────────────────────────────
 async function main() {
   console.log("🚀 OpEx LinkedIn Pipeline started");
@@ -719,10 +627,6 @@ async function main() {
     chars: post.length,
     with_image: !!imageAsset,
   });
-
-  // Versão pt-BR no blog do site — additivo, isolado: nunca derruba o LinkedIn.
-  try { await publishToBlog(topic, post, research); }
-  catch (e) { console.warn("   ⚠ Blog pt-BR pulado (LinkedIn ok):", e.message); }
 
   console.log("\n✅ Pipeline completed successfully!\n");
 }
