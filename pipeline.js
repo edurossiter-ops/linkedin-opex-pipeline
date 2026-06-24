@@ -595,6 +595,129 @@ function saveLog(entry) {
   } catch {}
 }
 
+// ─── Step 6: Publish to Blog (rossiter.de) ───────────────────────────────────
+async function publishToBlog(topic, research, postEN) {
+  const SITE_REPO_TOKEN = process.env.SITE_REPO_TOKEN;
+  if (!SITE_REPO_TOKEN) {
+    console.warn("   ⚠ SITE_REPO_TOKEN not set — skipping blog");
+    return;
+  }
+
+  console.log("
+📝 Translating post and publishing to blog...");
+
+  try {
+    // Step 1: Translate and adapt to pt-BR blog format
+    const data = await callClaude({
+      messages: [{
+        role: "user",
+        content: `You are Eduardo Rossiter, a Brazilian operational excellence consultant based in Germany.
+
+Translate and adapt the following LinkedIn post into a Portuguese (Brazil) blog article for rossiter.de/blog.
+
+ORIGINAL POST (English):
+${postEN}
+
+RESEARCH CONTEXT:
+- Topic: ${topic}
+- Key finding: ${research.headline_finding || ""}
+- Source: ${research.source_name || ""}
+
+BLOG ADAPTATION RULES:
+- Translate to Portuguese (Brazil) with precise technical terminology
+- Expand the content — the blog version should be richer than the LinkedIn post (600-900 words)
+- Use first person ("eu") as Eduardo speaking directly
+- Maintain the Rossiter voice: direct, no-nonsense, data-driven, anti-jargon without translation
+- Use the territory concept: "margem escondida" — hidden margin inside the operation
+- Structure: opening hook → problem → data/evidence → insight → practical implication → closing question
+- NO bullet points — flowing paragraphs only
+- Include the key stats from the research with sources
+- End with a call to action related to "diagnóstico"
+
+Return ONLY valid JSON (no markdown):
+{
+  "title": "Post title in Portuguese (max 70 chars)",
+  "excerpt": "Meta description in Portuguese (max 155 chars)",
+  "body": "Full blog post body in markdown format (paragraphs only, no bullets)"
+}`
+      }],
+      max_tokens: 2000,
+    });
+
+    const text = (data.content || []).filter(b => b.type === "text").map(b => b.text).join("
+");
+    const jsonMatch = text.match(/\{[\s\S]*\}/);
+    if (!jsonMatch) throw new Error("No JSON returned from translation");
+    
+    const blog = JSON.parse(jsonMatch[0]);
+    if (!blog.title || !blog.body) throw new Error("Invalid blog JSON structure");
+
+    // Step 2: Generate Jekyll front matter
+    const now = new Date();
+    const dateStr = now.toISOString().split("T")[0]; // YYYY-MM-DD
+    const slug = blog.title
+      .toLowerCase()
+      .normalize("NFD").replace(/[̀-ͯ]/g, "") // remove accents
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-|-$/g, "")
+      .slice(0, 60);
+
+    const filename = `${dateStr}-${slug}.md`;
+    const jekyllPost = `---
+layout: post
+title: "${blog.title.replace(/"/g, '\"')}"
+date: ${now.toISOString()}
+excerpt: "${blog.excerpt.replace(/"/g, '\"')}"
+author: Eduardo Rossiter
+---
+
+${blog.body}
+`;
+
+    // Step 3: Push to GitHub via API
+    const apiBase = "https://api.github.com";
+    const repo = "edurossiter-ops/rossiter.de";
+    const filePath = `_posts/${filename}`;
+    const headers = {
+      "Authorization": `Bearer ${SITE_REPO_TOKEN}`,
+      "Content-Type": "application/json",
+      "Accept": "application/vnd.github+json",
+      "X-GitHub-Api-Version": "2022-11-28",
+    };
+
+    // Check if file already exists (to get SHA for update)
+    let sha = null;
+    const checkRes = await fetch(`${apiBase}/repos/${repo}/contents/${filePath}`, { headers });
+    if (checkRes.ok) {
+      const existing = await checkRes.json();
+      sha = existing.sha;
+    }
+
+    // Create or update file
+    const body = {
+      message: `blog: add post "${blog.title}" [skip ci]`,
+      content: Buffer.from(jekyllPost).toString("base64"),
+      ...(sha && { sha }),
+    };
+
+    const pushRes = await fetch(`${apiBase}/repos/${repo}/contents/${filePath}`, {
+      method: "PUT",
+      headers,
+      body: JSON.stringify(body),
+    });
+
+    if (!pushRes.ok) {
+      const err = await pushRes.text();
+      throw new Error(`GitHub API error ${pushRes.status}: ${err}`);
+    }
+
+    console.log(`   ✓ Blog post published: _posts/${filename}`);
+
+  } catch (err) {
+    console.warn(`   ⚠ Blog post skipped: ${err.message}`);
+  }
+}
+
 // ─── Main ─────────────────────────────────────────────────────────────────────
 async function main() {
   console.log("🚀 OpEx LinkedIn Pipeline started");
@@ -620,6 +743,11 @@ async function main() {
 
   const result = await publishToLinkedIn(post, imageAsset, personURN);
   console.log(`\n   ✓ ${DRY_RUN ? "Dry run complete" : "Published! ID: " + result.id}`);
+
+  // Publish to blog
+  if (!DRY_RUN) {
+    await publishToBlog(topic, research, post);
+  }
 
   saveLog({
     date: new Date().toISOString(),
