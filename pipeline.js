@@ -603,8 +603,7 @@ async function publishToBlog(topic, research, postEN) {
     return;
   }
 
-  console.log("
-📝 Translating post and publishing to blog...");
+  console.log("\n📝 Translating post and publishing to blog...");
 
   try {
     // Step 1: Translate and adapt to pt-BR blog format
@@ -644,8 +643,7 @@ Return ONLY valid JSON (no markdown):
       max_tokens: 2000,
     });
 
-    const text = (data.content || []).filter(b => b.type === "text").map(b => b.text).join("
-");
+    const text = (data.content || []).filter(b => b.type === "text").map(b => b.text).join("\n");
     const jsonMatch = text.match(/\{[\s\S]*\}/);
     if (!jsonMatch) throw new Error("No JSON returned from translation");
     
