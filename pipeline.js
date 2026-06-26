@@ -599,20 +599,20 @@ function saveLog(entry) {
 async function publishToBlog(topic, research, postEN) {
   const SITE_REPO_TOKEN = process.env.SITE_REPO_TOKEN;
   if (!SITE_REPO_TOKEN) {
-    console.warn("   ⚠ SITE_REPO_TOKEN not set — skipping blog");
+    console.warn("   \u26a0 SITE_REPO_TOKEN not set \u2014 skipping blog");
     return;
   }
 
-  console.log("\n📝 Translating post and publishing to blog...");
+  console.log("\n\ud83d\udcdd Translating and publishing to blog...");
 
   try {
-    // Step 1: Translate and adapt to pt-BR blog format
+    // Step 1: Translate and adapt to pt-BR
     const data = await callClaude({
       messages: [{
         role: "user",
         content: `You are Eduardo Rossiter, a Brazilian operational excellence consultant based in Germany.
 
-Translate and adapt the following LinkedIn post into a Portuguese (Brazil) blog article for rossiter.de/blog.
+Translate and adapt this LinkedIn post into a Portuguese (Brazil) blog article for rossiter.de/blog.
 
 ORIGINAL POST (English):
 ${postEN}
@@ -622,60 +622,40 @@ RESEARCH CONTEXT:
 - Key finding: ${research.headline_finding || ""}
 - Source: ${research.source_name || ""}
 
-BLOG ADAPTATION RULES:
-- Translate to Portuguese (Brazil) with precise technical terminology
-- Expand the content — the blog version should be richer than the LinkedIn post (600-900 words)
-- Use first person ("eu") as Eduardo speaking directly
-- Maintain the Rossiter voice: direct, no-nonsense, data-driven, anti-jargon without translation
-- Use the territory concept: "margem escondida" — hidden margin inside the operation
-- Structure: opening hook → problem → data/evidence → insight → practical implication → closing question
-- NO bullet points — flowing paragraphs only
-- Include the key stats from the research with sources
-- End with a call to action related to "diagnóstico"
+RULES:
+- Portuguese (Brazil), precise technical terminology
+- 600-900 words, richer than the LinkedIn post
+- First person ("eu"), Eduardo's voice: direct, data-driven, no jargon without translation
+- Use "margem escondida" territory concept where relevant
+- Structure: hook → problem → data/evidence → insight → practical implication → call to action for "diagnóstico"
+- Paragraphs only, NO bullet points
+- End with a question or reflection
 
-Return ONLY valid JSON (no markdown):
-{
-  "title": "Post title in Portuguese (max 70 chars)",
-  "excerpt": "Meta description in Portuguese (max 155 chars)",
-  "body": "Full blog post body in markdown format (paragraphs only, no bullets)"
-}`
+Return ONLY valid JSON with NO markdown fences:
+{"title":"Post title in Portuguese (max 70 chars)","excerpt":"Meta description (max 155 chars)","body":"Full post in markdown, paragraphs only"}`
       }],
       max_tokens: 2000,
     });
 
     const text = (data.content || []).filter(b => b.type === "text").map(b => b.text).join("\n");
     const jsonMatch = text.match(/\{[\s\S]*\}/);
-    if (!jsonMatch) throw new Error("No JSON returned from translation");
-    
-    const blog = JSON.parse(jsonMatch[0]);
-    if (!blog.title || !blog.body) throw new Error("Invalid blog JSON structure");
+    if (!jsonMatch) throw new Error("No JSON returned");
 
-    // Step 2: Generate Jekyll front matter
+    const blog = JSON.parse(jsonMatch[0]);
+    if (!blog.title || !blog.body) throw new Error("Invalid blog JSON");
+
+    // Step 2: Build slug and filename
     const now = new Date();
-    const dateStr = now.toISOString().split("T")[0]; // YYYY-MM-DD
-    const slug = blog.title
+    const dateStr = now.toISOString().split("T")[0];
+    const slug = dateStr + "-" + blog.title
       .toLowerCase()
-      .normalize("NFD").replace(/[̀-ͯ]/g, "") // remove accents
+      .normalize("NFD").replace(/[\u0300-\u036f]/g, "")
       .replace(/[^a-z0-9]+/g, "-")
       .replace(/^-|-$/g, "")
       .slice(0, 60);
 
-    const filename = `${dateStr}-${slug}.md`;
-    const jekyllPost = `---
-layout: post
-title: "${blog.title.replace(/"/g, '\"')}"
-date: ${now.toISOString()}
-excerpt: "${blog.excerpt.replace(/"/g, '\"')}"
-author: Eduardo Rossiter
----
-
-${blog.body}
-`;
-
-    // Step 3: Push to GitHub via API
-    const apiBase = "https://api.github.com";
     const repo = "edurossiter-ops/rossiter.de";
-    const filePath = `_posts/${filename}`;
+    const apiBase = "https://api.github.com";
     const headers = {
       "Authorization": `Bearer ${SITE_REPO_TOKEN}`,
       "Content-Type": "application/json",
@@ -683,36 +663,72 @@ ${blog.body}
       "X-GitHub-Api-Version": "2022-11-28",
     };
 
-    // Check if file already exists (to get SHA for update)
-    let sha = null;
-    const checkRes = await fetch(`${apiBase}/repos/${repo}/contents/${filePath}`, { headers });
-    if (checkRes.ok) {
-      const existing = await checkRes.json();
-      sha = existing.sha;
-    }
+    // Step 3: Push markdown file to blog/posts/SLUG.md
+    const mdPath = `blog/posts/${slug}.md`;
+    const mdContent = blog.body;
 
-    // Create or update file
-    const body = {
-      message: `blog: add post "${blog.title}" [skip ci]`,
-      content: Buffer.from(jekyllPost).toString("base64"),
-      ...(sha && { sha }),
-    };
+    const checkMd = await fetch(`${apiBase}/repos/${repo}/contents/${mdPath}`, { headers });
+    const mdSha = checkMd.ok ? (await checkMd.json()).sha : null;
 
-    const pushRes = await fetch(`${apiBase}/repos/${repo}/contents/${filePath}`, {
+    const mdRes = await fetch(`${apiBase}/repos/${repo}/contents/${mdPath}`, {
       method: "PUT",
       headers,
-      body: JSON.stringify(body),
+      body: JSON.stringify({
+        message: `blog: add "${blog.title}" [skip ci]`,
+        content: Buffer.from(mdContent).toString("base64"),
+        ...(mdSha && { sha: mdSha }),
+      }),
     });
+    if (!mdRes.ok) throw new Error(`MD push error ${mdRes.status}: ${await mdRes.text()}`);
 
-    if (!pushRes.ok) {
-      const err = await pushRes.text();
-      throw new Error(`GitHub API error ${pushRes.status}: ${err}`);
-    }
+    // Step 4: Update blog/posts.json
+    const jsonPath = "blog/posts.json";
+    const jsonRes = await fetch(`${apiBase}/repos/${repo}/contents/${jsonPath}`, { headers });
+    if (!jsonRes.ok) throw new Error(`Could not fetch posts.json: ${jsonRes.status}`);
+    const jsonFile = await jsonRes.json();
+    const existingPosts = JSON.parse(Buffer.from(jsonFile.content, "base64").toString("utf8"));
 
-    console.log(`   ✓ Blog post published: _posts/${filename}`);
+    // Estimate reading time
+    const wordCount = blog.body.split(/\s+/).length;
+    const readingTime = Math.max(1, Math.round(wordCount / 200)) + " min";
+
+    // Pick image based on topic index
+    const images = [
+      "../assets/img/01_hero_solda.webp",
+      "../assets/img/02_metrologia.webp",
+      "../assets/img/03_manometro.webp",
+      "../assets/img/08_blog_aco.webp",
+      "../assets/img/09_blog_engrenagem.webp",
+    ];
+    const imgIndex = Math.floor(Date.now() / 1000) % images.length;
+
+    const newPost = {
+      slug,
+      title: blog.title,
+      date: dateStr,
+      excerpt: blog.excerpt,
+      image: images[imgIndex],
+      readingTime,
+    };
+
+    const updatedPosts = [newPost, ...existingPosts];
+
+    const jsonUpdateRes = await fetch(`${apiBase}/repos/${repo}/contents/${jsonPath}`, {
+      method: "PUT",
+      headers,
+      body: JSON.stringify({
+        message: `blog: update posts.json for "${blog.title}" [skip ci]`,
+        content: Buffer.from(JSON.stringify(updatedPosts, null, 2)).toString("base64"),
+        sha: jsonFile.sha,
+      }),
+    });
+    if (!jsonUpdateRes.ok) throw new Error(`posts.json update error ${jsonUpdateRes.status}: ${await jsonUpdateRes.text()}`);
+
+    console.log(`   \u2713 Blog post published: ${slug}`);
+    console.log(`   \u2713 posts.json updated (${updatedPosts.length} posts total)`);
 
   } catch (err) {
-    console.warn(`   ⚠ Blog post skipped: ${err.message}`);
+    console.warn(`   \u26a0 Blog post skipped: ${err.message}`);
   }
 }
 
