@@ -631,18 +631,33 @@ RULES:
 - Paragraphs only, NO bullet points
 - End with a question or reflection
 
-Return ONLY valid JSON with NO markdown fences:
-{"title":"Post title in Portuguese (max 70 chars)","excerpt":"Meta description (max 155 chars)","body":"Full post in markdown, paragraphs only"}`
+Return your response using EXACTLY these delimiters and nothing else:
+
+<<<TITLE>>>
+Post title in Portuguese (max 70 chars, no quotes)
+<<<EXCERPT>>>
+Meta description in Portuguese (max 155 chars, no quotes)
+<<<BODY>>>
+Full blog post body in markdown (paragraphs only, no bullets)
+<<<END>>>`
       }],
       max_tokens: 2000,
     });
 
     const text = (data.content || []).filter(b => b.type === "text").map(b => b.text).join("\n");
-    const jsonMatch = text.match(/\{[\s\S]*\}/);
-    if (!jsonMatch) throw new Error("No JSON returned");
 
-    const blog = JSON.parse(jsonMatch[0]);
-    if (!blog.title || !blog.body) throw new Error("Invalid blog JSON");
+    const titleMatch = text.match(/<<<TITLE>>>\s*([\s\S]*?)<<<EXCERPT>>>/);
+    const excerptMatch = text.match(/<<<EXCERPT>>>\s*([\s\S]*?)<<<BODY>>>/);
+    const bodyMatch = text.match(/<<<BODY>>>\s*([\s\S]*?)<<<END>>>/);
+
+    if (!titleMatch || !excerptMatch || !bodyMatch) throw new Error("Missing delimiters in response");
+
+    const blog = {
+      title: titleMatch[1].trim(),
+      excerpt: excerptMatch[1].trim(),
+      body: bodyMatch[1].trim(),
+    };
+    if (!blog.title || !blog.body) throw new Error("Empty blog content");
 
     // Step 2: Build slug and filename
     const now = new Date();
