@@ -73,6 +73,7 @@ async function getPersonURN() {
     { url: "https://api.linkedin.com/v2/me?projection=(id)", idField: "id" },
   ];
 
+  const statuses = [];
   for (const { url, idField } of endpoints) {
     try {
       const res = await fetch(url, {
@@ -91,11 +92,13 @@ async function getPersonURN() {
           return urn;
         }
       }
+      statuses.push(res.status);
     } catch {}
   }
 
   throw new Error(
-    "Could not auto-discover LinkedIn Person URN. " +
+    `Could not auto-discover LinkedIn Person URN (HTTP ${statuses.join(", ") || "no response"}; ` +
+    "401 = token expired, 403 = token lacks the openid/profile scopes). " +
     "Please set LINKEDIN_PERSON_URN secret manually (e.g. urn:li:person:XXXXXX). " +
     "You can find your ID by calling: curl -H 'Authorization: Bearer TOKEN' https://api.linkedin.com/v2/userinfo"
   );
@@ -785,7 +788,9 @@ async function main() {
   console.log(`   Mode: ${DRY_RUN ? "DRY RUN (no publishing)" : "PRODUCTION"}`);
   console.log(`   Date: ${new Date().toISOString()}`);
 
+  // LinkedIn identity is resolved before any Claude call, so a bad token costs nothing
   if (!DRY_RUN) await checkLinkedInToken();
+  const personURN = DRY_RUN ? "dry-run" : (process.env.LINKEDIN_PERSON_URN || await getPersonURN());
 
   const { topic, tone } = getNextTopic();
   console.log(`\n📌 Topic: ${topic}`);
@@ -800,7 +805,6 @@ async function main() {
   const post = await generatePost(topic, tone, research);
   console.log(`\n   ✓ Post generated (${post.length} characters)`);
 
-  const personURN = DRY_RUN ? "dry-run" : (process.env.LINKEDIN_PERSON_URN || await getPersonURN());
   const imagePath = await generateImage(topic, research);
   const imageAsset = (imagePath && !DRY_RUN) ? await uploadImageToLinkedIn(imagePath, personURN) : null;
 
