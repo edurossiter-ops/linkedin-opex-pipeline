@@ -4,7 +4,7 @@
  * Researches recent articles → Generates high-level post → Publishes to LinkedIn
  */
 
-import { readFileSync, writeFileSync, existsSync } from "fs";
+import { readFileSync, writeFileSync, existsSync, mkdirSync } from "fs";
 import { join, dirname } from "path";
 import { fileURLToPath } from "url";
 
@@ -18,6 +18,39 @@ const DRY_RUN = process.env.DRY_RUN === "true"; // true = generate only, do not 
 
 if (!ANTHROPIC_API_KEY) throw new Error("ANTHROPIC_API_KEY is not set");
 if (!DRY_RUN && !LINKEDIN_ACCESS_TOKEN) throw new Error("LINKEDIN_ACCESS_TOKEN is not set");
+
+// ─── GitHub Actions annotation ───────────────────────────────────────────────
+// Shows the message on the run summary page, readable without opening the log
+function annotate(level, title, message) {
+  if (!process.env.GITHUB_ACTIONS) return;
+  const text = String(message).replace(/%/g, "%25").replace(/\r?\n/g, " ");
+  console.log(`::${level} title=${title}::${text}`);
+}
+
+// ─── Preflight: LinkedIn token ───────────────────────────────────────────────
+// LinkedIn access tokens expire after 60 days. Checked before any Claude call so
+// an expired token fails in the first second, not after paid research/generation.
+async function checkLinkedInToken() {
+  let res;
+  try {
+    res = await fetch("https://api.linkedin.com/v2/userinfo", {
+      headers: { "Authorization": `Bearer ${LINKEDIN_ACCESS_TOKEN}` },
+    });
+  } catch (err) {
+    console.warn(`   ⚠ LinkedIn token check skipped (network): ${err.message}`);
+    return;
+  }
+  // 401 = expired, revoked or malformed. 403 = valid token without profile scope (fine).
+  if (res.status === 401) {
+    throw new Error(
+      `LINKEDIN_ACCESS_TOKEN rejected by LinkedIn (401): ${await res.text()} ` +
+      "LinkedIn tokens last 60 days. Generate a new one (scope w_member_social) at " +
+      "https://www.linkedin.com/developers/tools/oauth/token-generator " +
+      "and update the LINKEDIN_ACCESS_TOKEN repository secret."
+    );
+  }
+  console.log("   ✓ LinkedIn token accepted");
+}
 
 // ─── Auto-discover LinkedIn Person URN ───────────────────────────────────────
 async function getPersonURN() {
@@ -587,9 +620,7 @@ async function publishToLinkedIn(postText, imageAsset, personURN) {
 function saveLog(entry) {
   const logFile = join(ROOT, "logs", "posts.jsonl");
   const dir = join(ROOT, "logs");
-  if (!existsSync(dir)) {
-    import("fs").then(fs => fs.mkdirSync(dir, { recursive: true }));
-  }
+  if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
   try {
     writeFileSync(logFile, JSON.stringify(entry) + "\n", { flag: "a" });
   } catch {}
@@ -744,6 +775,7 @@ Full blog post body in markdown (paragraphs only, no bullets)
 
   } catch (err) {
     console.warn(`   \u26a0 Blog post skipped: ${err.message}`);
+    annotate("warning", "Blog post skipped", err.message);
   }
 }
 
@@ -752,6 +784,8 @@ async function main() {
   console.log("🚀 OpEx LinkedIn Pipeline started");
   console.log(`   Mode: ${DRY_RUN ? "DRY RUN (no publishing)" : "PRODUCTION"}`);
   console.log(`   Date: ${new Date().toISOString()}`);
+
+  if (!DRY_RUN) await checkLinkedInToken();
 
   const { topic, tone } = getNextTopic();
   console.log(`\n📌 Topic: ${topic}`);
@@ -794,5 +828,6 @@ async function main() {
 
 main().catch(err => {
   console.error("\n❌ Pipeline error:", err.message);
+  annotate("error", "OpEx pipeline failed", err.message);
   process.exit(1);
 });
